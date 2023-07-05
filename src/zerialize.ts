@@ -18,6 +18,7 @@ import {
   SzPromise,
   SzPrimitive,
   SzNumber,
+  SzDescription,
 } from "./types";
 
 export const PRIMITIVES = {
@@ -53,9 +54,8 @@ type ZerializeArray<Items extends Schema[]> = {
 };
 
 // Types must match the exported zerialize function's implementation
-export type Zerialize<T extends Schema> =
-  // Modifier types
-  T extends z.ZodOptional<infer I>
+export type Zerialize<T extends Schema> = Partial<SzDescription> &
+  (T extends z.ZodOptional<infer I> // Modifier types
     ? Zerialize<I> & SzOptional
     : T extends z.ZodNullable<infer I>
     ? Zerialize<I> & SzNullable
@@ -115,7 +115,7 @@ export type Zerialize<T extends Schema> =
     ? Zerialize<Out>
     : T extends z.ZodCatch<infer Inner>
     ? Zerialize<Inner>
-    : unknown;
+    : unknown);
 
 type ZodTypeMap = {
   [Key in TypeName<Schema>]: Extract<Schema, { _def: { typeName: Key } }>;
@@ -137,11 +137,20 @@ const STRING_KINDS = new Set([
 ]);
 
 const zerializers = {
-  ZodOptional: (def) => ({ ...zerialize(def.innerType), isOptional: true }),
-  ZodNullable: (def) => ({ ...zerialize(def.innerType), isNullable: true }),
+  ZodOptional: (def) => ({
+    ...zerialize(def.innerType),
+    isOptional: true,
+    description: def.description,
+  }),
+  ZodNullable: (def) => ({
+    ...zerialize(def.innerType),
+    isNullable: true,
+    description: def.description,
+  }),
   ZodDefault: (def) => ({
     ...zerialize(def.innerType),
     defaultValue: def.defaultValue(),
+    description: def.description,
   }),
 
   ZodNumber: (def) => {
@@ -171,7 +180,7 @@ const zerializers = {
       }),
       {}
     );
-    return { type: "number", ...checks };
+    return { type: "number", description: def.description, ...checks };
   },
   ZodString: (def) => {
     const checks = def.checks.reduce(
@@ -213,10 +222,10 @@ const zerializers = {
       }),
       {}
     );
-    return { type: "string", ...checks };
+    return { type: "string", description: def.description, ...checks };
   },
-  ZodBoolean: () => ({ type: "boolean" }),
-  ZodNaN: () => ({ type: "nan" }),
+  ZodBoolean: (def) => ({ type: "boolean", description: def.description }),
+  ZodNaN: (def) => ({ type: "nan", description: def.description }),
   ZodBigInt: (def) => {
     const checks = def.checks.reduce(
       (o, check) => ({
@@ -240,7 +249,7 @@ const zerializers = {
       }),
       {}
     );
-    return { type: "bigInt", ...checks };
+    return { type: "bigInt", description: def.description, ...checks };
   },
   ZodDate: (def) => {
     const checks = def.checks.reduce(
@@ -257,19 +266,24 @@ const zerializers = {
       }),
       {}
     );
-    return { type: "date", ...checks };
+    return { type: "date", description: def.description, ...checks };
   },
-  ZodUndefined: () => ({ type: "undefined" }),
-  ZodNull: () => ({ type: "null" }),
-  ZodAny: () => ({ type: "any" }),
-  ZodUnknown: () => ({ type: "unknown" }),
-  ZodNever: () => ({ type: "never" }),
-  ZodVoid: () => ({ type: "void" }),
+  ZodUndefined: (def) => ({ type: "undefined", description: def.description }),
+  ZodNull: (def) => ({ type: "null", description: def.description }),
+  ZodAny: (def) => ({ type: "any", description: def.description }),
+  ZodUnknown: (def) => ({ type: "unknown", description: def.description }),
+  ZodNever: (def) => ({ type: "never", description: def.description }),
+  ZodVoid: (def) => ({ type: "void", description: def.description }),
 
-  ZodLiteral: (def) => ({ type: "literal", value: def.value }),
+  ZodLiteral: (def) => ({
+    type: "literal",
+    description: def.description,
+    value: def.value,
+  }),
 
   ZodTuple: (def) => ({
     type: "tuple",
+    description: def.description,
     items: def.items.map(zerialize),
     ...(def.rest
       ? {
@@ -279,12 +293,14 @@ const zerializers = {
   }),
   ZodSet: (def) => ({
     type: "set",
+    description: def.description,
     value: zerialize(def.valueType),
     ...(def.minSize === null ? {} : { minSize: def.minSize.value }),
     ...(def.maxSize === null ? {} : { maxSize: def.maxSize.value }),
   }),
   ZodArray: (def) => ({
     type: "array",
+    description: def.description,
     element: zerialize(def.type),
 
     ...(def.exactLength === null
@@ -299,6 +315,7 @@ const zerializers = {
 
   ZodObject: (def) => ({
     type: "object",
+    description: def.description,
     properties: Object.fromEntries(
       Object.entries(def.shape()).map(([key, value]) => [
         key,
@@ -308,40 +325,54 @@ const zerializers = {
   }),
   ZodRecord: (def) => ({
     type: "record",
+    description: def.description,
     key: zerialize(def.keyType),
     value: zerialize(def.valueType),
   }),
   ZodMap: (def) => ({
     type: "map",
+    description: def.description,
     key: zerialize(def.keyType),
     value: zerialize(def.valueType),
   }),
 
-  ZodEnum: (def) => ({ type: "enum", values: def.values }),
+  ZodEnum: (def) => ({
+    type: "enum",
+    description: def.description,
+    values: def.values,
+  }),
   // TODO: turn into enum
-  ZodNativeEnum: () => ({ type: "unknown" }),
+  ZodNativeEnum: (def) => ({ type: "unknown", description: def.description }),
 
   ZodUnion: (def) => ({
     type: "union",
+    description: def.description,
     options: def.options.map(zerialize),
   }),
   ZodDiscriminatedUnion: (def) => ({
     type: "discriminatedUnion",
+    description: def.description,
     discriminator: def.discriminator,
     options: def.options.map(zerialize),
   }),
   ZodIntersection: (def) => ({
     type: "intersection",
+    description: def.description,
     left: zerialize(def.left),
     right: zerialize(def.right),
   }),
 
   ZodFunction: (def) => ({
     type: "function",
+    description: def.description,
     args: zerialize(def.args),
     returns: zerialize(def.returns),
   }),
-  ZodPromise: (def) => ({ type: "promise", value: zerialize(def.type) }),
+  ZodPromise: (def) => ({
+    type: "promise",
+    description: def.description,
+    value: zerialize(def.type),
+  }),
 
   ZodLazy: (def) => zerialize(def.getter()),
   ZodEffects: (def) => zerialize(def.schema),
